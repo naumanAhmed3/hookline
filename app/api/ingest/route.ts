@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createEvent, fanOutDeliveries } from '@/lib/repo';
+import { ingestEvent } from '@/lib/repo';
 import { drainQueue } from '@/lib/worker';
+import { authError, requireIngest } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,11 @@ export const maxDuration = 60;
 // endpoint, and immediately attempt delivery. An `Idempotency-Key`
 // header makes ingestion exactly-once.
 export async function POST(req: Request) {
+  try {
+    requireIngest(req);
+  } catch (error) {
+    return authError(error) ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   let body: unknown;
   try {
     body = await req.json();
@@ -29,27 +35,19 @@ export async function POST(req: Request) {
 
   const idempotencyKey = req.headers.get('idempotency-key');
 
-  const { event, created } = await createEvent({
+  const { event, created, deliveryIds } = await ingestEvent({
     event_type: eventType,
     payload,
     idempotency_key: idempotencyKey,
     source: 'api',
   });
 
-  if (!created) {
-    return NextResponse.json(
-      { event_id: event.id, deduplicated: true, deliveries: 0 },
-      { status: 200 },
-    );
-  }
-
-  const deliveryIds = await fanOutDeliveries(event.id);
   // Attempt delivery inline so the caller sees the first result;
   // failed deliveries are retried later by the scheduled drain.
   const drain = await drainQueue();
 
   return NextResponse.json(
-    { event_id: event.id, deduplicated: false, deliveries: deliveryIds.length, drain },
-    { status: 202 },
+    { event_id: event.id, deduplicated: !created, deliveries_created: deliveryIds.length, drain },
+    { status: created ? 202 : 200 },
   );
 }
