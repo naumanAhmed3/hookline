@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deleteEndpoint, setEndpointEnabled } from '@/lib/repo';
+import { authError, requireAdmin } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,6 +10,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  try { requireAdmin(req); } catch (error) {
+    return authError(error) ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   const { id } = await params;
   let body: unknown;
   try {
@@ -26,9 +30,12 @@ export async function PATCH(
 
 // DELETE /api/endpoints/:id
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  try { requireAdmin(req); } catch (error) {
+    return authError(error) ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   const { id } = await params;
   await deleteEndpoint(id);
   return NextResponse.json({ deleted: id });
