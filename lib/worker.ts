@@ -8,6 +8,7 @@ import {
   SIGNATURE_HEADER,
 } from './signing';
 import type { Delivery, Endpoint, WebhookEvent } from './types';
+import { readSnippet, safeFetch } from './safe-url';
 
 // ─────────────────────────────────────────────────────────────
 // The delivery engine. A delivery row is the queue item:
@@ -80,7 +81,7 @@ async function attemptDelivery(
   let snippet: string | null = null;
   const start = Date.now();
   try {
-    const res = await fetch(endpoint.url, {
+    const res = await safeFetch(endpoint.url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -94,7 +95,7 @@ async function attemptDelivery(
     });
     statusCode = res.status;
     ok = res.ok;
-    snippet = (await res.text().catch(() => '')).slice(0, 500);
+    snippet = await readSnippet(res).catch(() => '');
     if (!ok) error = `Receiver responded ${res.status}`;
   } catch (e) {
     if (e instanceof Error) {

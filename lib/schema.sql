@@ -41,6 +41,8 @@ create index if not exists deliveries_due_idx
   where status = 'pending';
 
 create index if not exists deliveries_status_idx on deliveries (status);
+create unique index if not exists deliveries_event_endpoint_idx
+  on deliveries (event_id, endpoint_id);
 
 -- An immutable record of every delivery attempt — the audit trail.
 create table if not exists delivery_attempts (

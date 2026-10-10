@@ -70,6 +70,36 @@ export async function createEvent(
   return { event, created: inserted };
 }
 
+/** Atomically persist an event and every enabled endpoint queue item.
+ *
+ * Replays also reconcile missing delivery rows, so a historical partial
+ * write cannot remain orphaned forever.
+ */
+export async function ingestEvent(
+  input: CreateEventInput,
+): Promise<{ event: WebhookEvent; created: boolean; deliveryIds: string[] }> {
+  const sql = db();
+  return sql.begin(async (tx) => {
+    const rows = await tx<(WebhookEvent & { inserted: boolean })[]>`
+      insert into events (id, event_type, payload, idempotency_key, source)
+      values (
+        ${newId('evt')}, ${input.event_type}, ${tx.json(input.payload as never)},
+        ${input.idempotency_key ?? null}, ${input.source ?? null}
+      )
+      on conflict (idempotency_key) do update set event_type = events.event_type
+      returning *, (xmax = 0) as inserted`;
+    const { inserted, ...event } = rows[0];
+    const deliveries = await tx<{ id: string }[]>`
+      insert into deliveries (id, event_id, endpoint_id)
+      select ${newId('del')} || '_' || substr(md5(ep.id), 1, 8), ${event.id}, ep.id
+      from endpoints ep
+      where ep.enabled = true
+      on conflict (event_id, endpoint_id) do nothing
+      returning id`;
+    return { event, created: inserted, deliveryIds: deliveries.map((row) => row.id) };
+  });
+}
+
 export async function getEvent(id: string): Promise<WebhookEvent | null> {
   const [row] = await db()<WebhookEvent[]>`select * from events where id = ${id}`;
   return row ?? null;
